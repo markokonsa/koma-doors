@@ -1,0 +1,65 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Permissions for the main window",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        {
+          "path": "$HOME/**"
+        },
+        {
+          "path": "/Applications/**"
+        }
+      ]
+    },
+    "dialog:default",
+    "notification:default",
+    "deep-link:default",
+    "http:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "open-in-cursor",
+          "cmd": "open",
+          "args": [
+            "-a",
+            "Cursor",
+            {
+              "validator": "^/.+"
+            }
+          ]
+        },
+        {
+          "name": "open-in-vscode",
+          "cmd": "open",
+          "args": [
+            "-a",
+            "Visual Studio Code",
+            {
+              "validator": "^/.+"
+            }
+          ]
+        },
+        {
+          "name": "open-in-terminal",
+          "cmd": "open",
+          "args": [
+            "-a",
+            "Terminal",
+            {
+              "validator": "^/.+"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
