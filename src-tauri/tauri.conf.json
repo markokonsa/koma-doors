@@ -13,10 +13,13 @@
     "windows": [
       {
         "title": "KOMA",
-        "width": 1100,
-        "height": 760,
-        "minWidth": 520,
-        "minHeight": 480
+        "width": 1360,
+        "height": 860,
+        "minWidth": 960,
+        "minHeight": 620,
+        "label": "main",
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       }
     ],
     "security": {
@@ -38,9 +41,13 @@
     "deep-link": {
       "mobile": [
         {
-          "scheme": ["https"],
+          "scheme": [
+            "https"
+          ],
           "host": "app.ulemistecity.ee",
-          "pathPrefix": ["/l"],
+          "pathPrefix": [
+            "/l"
+          ],
           "appLink": true
         }
       ]

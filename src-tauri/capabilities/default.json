@@ -1,12 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions for the main window",
+  "description": "Permissions for the main window. Door processes run through the app's own runner commands (src-tauri/src/runner.rs).",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:default",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-start-dragging",
     "opener:default",
     {
       "identifier": "opener:allow-open-path",
@@ -22,44 +24,6 @@
     "dialog:default",
     "notification:default",
     "deep-link:default",
-    "http:default",
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [
-        {
-          "name": "open-in-cursor",
-          "cmd": "open",
-          "args": [
-            "-a",
-            "Cursor",
-            {
-              "validator": "^/.+"
-            }
-          ]
-        },
-        {
-          "name": "open-in-vscode",
-          "cmd": "open",
-          "args": [
-            "-a",
-            "Visual Studio Code",
-            {
-              "validator": "^/.+"
-            }
-          ]
-        },
-        {
-          "name": "open-in-terminal",
-          "cmd": "open",
-          "args": [
-            "-a",
-            "Terminal",
-            {
-              "validator": "^/.+"
-            }
-          ]
-        }
-      ]
-    }
+    "http:default"
   ]
 }

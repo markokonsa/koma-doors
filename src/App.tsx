@@ -1,135 +1,107 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { ArrowLeft, ExternalLink, FolderOpen, ChevronRight } from "lucide-react";
-import { GROUPS, type DashboardCard } from "./cards";
-import { runAction } from "./actions";
-import { PAGES } from "./pages";
+import { useEffect } from "react";
+import { DoorDialog } from "./components/DoorDialog";
+import { Launcher } from "./components/Launcher";
+import { ProjectDialog } from "./components/ProjectDialog";
+import { RunRail } from "./components/RunRail";
+import { Sidebar } from "./components/Sidebar";
+import { TitleBar } from "./components/TitleBar";
+import { Toasts } from "./components/Toasts";
+import { runDoor } from "./doors/runs";
+import { useDoorsState } from "./doors/store";
+import { toastError } from "./lib/toast";
+import { anyOverlayOpen, getUi, openDoorDialog, openLauncher, useUi } from "./lib/ui";
+import { FlowPage } from "./pages/FlowPage";
+import { ProjectPage, automationDoors } from "./pages/ProjectPage";
+import { ScriptPage } from "./pages/ScriptPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { navigate, useRoute } from "./router";
 
-function greeting(h: number) {
-  if (h < 5) return "Good night";
-  if (h < 12) return "Good morning";
-  if (h < 18) return "Good afternoon";
-  return "Good evening";
-}
+const LAST_PROJECT = "koma-home:last-project";
 
-function useNow() {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 15_000);
-    return () => clearInterval(t);
-  }, []);
-  return now;
-}
-
-const ACTION_ICON = { link: ExternalLink, path: FolderOpen, app: FolderOpen, page: ChevronRight } as const;
-
-function Card({ card, index, onError }: { card: DashboardCard; index: number; onError: (m: string) => void }) {
-  const Icon = card.icon;
-  const Hint = card.action.type == "action" ? 
-   undefined :
-    ACTION_ICON[card.action.type];
-  return (
-    <button
-      className="card"
-      style={{ "--accent": card.accent } as CSSProperties}
-      onClick={() => runAction(card.action).catch((e: unknown) => onError(e instanceof Error ? e.message : String(e)))}
-      title={card.description}
-    >
-      <span className="card-icon">
-        <Icon size={22} strokeWidth={1.75} />
-      </span>
-      <span className="card-body">
-        <span className="card-title">{card.title}</span>
-        <span className="card-desc">{card.description}</span>
-      </span>
-      <span className="card-hint" aria-hidden="true">
-        {index < 9 && <kbd>{index + 1}</kbd>}
-        {Hint && <Hint size={16} />}
-      </span>
-    </button>
-  );
+function rememberedProject() {
+  try {
+    return localStorage.getItem(LAST_PROJECT) ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function App() {
   const route = useRoute();
-  const [error, setError] = useState<string | null>(null);
-  const allCards = useMemo(() => GROUPS.flatMap((g) => g.cards), []);
+  const ui = useUi();
+  const { projects, doors } = useDoorsState();
 
-  // 1–9 open cards on the home screen; Escape returns home from a page.
+  // The project shown in the sidebar as current: the route's, the door's, or the last one opened.
+  const routeDoor = route.name === "script" || route.name === "flow" ? doors.find((d) => d.id === route.doorId) : undefined;
+  const wanted = route.name === "project" ? route.projectId : routeDoor?.projectId;
+  const project =
+    projects.find((p) => p.id === wanted) ?? projects.find((p) => p.id === rememberedProject()) ?? projects[0];
+  const currentProjectId = route.name === "settings" || (route.name === "flow" && !routeDoor) ? wanted : project?.id;
+
+  useEffect(() => {
+    if (route.name !== "project" || !project) return;
+    try {
+      localStorage.setItem(LAST_PROJECT, project.id);
+    } catch {
+      /* storage unavailable */
+    }
+  }, [route.name, project]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) {
-        if (e.key === "Escape") navigate(null);
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        openLauncher(!getUi().launcher);
         return;
       }
-      if (e.key === "Escape") return navigate(null);
-      if (route || e.metaKey || e.ctrlKey || e.altKey) return;
-      const n = Number(e.key);
-      const card = n >= 1 && n <= 9 ? allCards[n - 1] : undefined;
-      if (card) runAction(card.action).catch((err: unknown) => setError(String(err)));
+      if (anyOverlayOpen()) return;
+      const typing = e.target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+      if (e.key === "Escape" && !typing && route.name !== "project") {
+        navigate({ name: "project", projectId: project?.id });
+      } else if (mod && e.key.toLowerCase() === "n" && project) {
+        e.preventDefault();
+        openDoorDialog({ projectId: project.id });
+      } else if (mod && !e.shiftKey && /^[1-9]$/.test(e.key) && route.name === "project" && project) {
+        const door = automationDoors(doors, project.id)[Number(e.key) - 1];
+        if (door) {
+          e.preventDefault();
+          runDoor(door, project).catch(toastError);
+        }
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [route, allCards]);
+  }, [route.name, project, doors]);
 
-  useEffect(() => {
-    if (!error) return;
-    const t = setTimeout(() => setError(null), 4000);
-    return () => clearTimeout(t);
-  }, [error]);
-
-  if (route) {
-    const page = PAGES[route.page];
-    const Page = page.component;
-    return (
-      <main className="shell">
-        <header className="page-head">
-          <button className="back" onClick={() => navigate(null)}>
-            <ArrowLeft size={16} /> Home
-          </button>
-          <h1>{page.title}</h1>
-        </header>
-        <section className="page-body">
-          <Page param={route.param} />
-        </section>
-      </main>
-    );
+  let page;
+  switch (route.name) {
+    case "script":
+      page = <ScriptPage doorId={route.doorId} />;
+      break;
+    case "flow":
+      page = <FlowPage doorId={route.doorId} currentProjectId={project?.id} />;
+      break;
+    case "settings":
+      page = <SettingsPage />;
+      break;
+    default:
+      page = <ProjectPage project={project} />;
   }
 
-  let index = 0;
   return (
-    <main className="shell">
-   
-      <header className="sticky top-0 left-0 w-full flex flex-row items-center justify-center">
-      <div className="brand mx-auto flex flex-row justify-center items-center">
-          <img src="/koma.png" alt="KOMA" width={80} height={80} />
+    <div className="flex h-full flex-col">
+      <TitleBar />
+      <div className="flex min-h-0 flex-1">
+        <Sidebar currentProjectId={currentProjectId} />
+        <main className="min-w-0 flex-1 overflow-y-auto">{page}</main>
+        {route.name === "project" && <RunRail />}
       </div>
-      </header>
 
-    
-
-
-      {GROUPS.map((group) => (
-        <section key={group.title} className="group w-full">
-          <div className="flex flex-row items-center justify-between">
-          <h2>{group.title}</h2>
-          </div>
-          <div className="grid">
-            {group.cards.map((card) => (
-              <Card key={card.id} card={card} index={index++} onError={setError} />
-            ))}
-          </div>
-        </section>
-      ))}
-
-
-      {error && (
-        <div className="toast" role="alert">
-          {error}
-        </div>
-      )}
-    </main>
-
+      {ui.launcher && <Launcher currentProjectId={project?.id} />}
+      {ui.doorDialog && <DoorDialog key={ui.doorDialog.door?.id ?? "new"} {...ui.doorDialog} />}
+      {ui.projectDialog && <ProjectDialog key={ui.projectDialog.project?.id ?? "new"} {...ui.projectDialog} />}
+      <Toasts />
+    </div>
   );
 }

@@ -1,12 +1,11 @@
 /**
- * Apps a project card can open a folder in. `command` is the name of an allow-listed shell command in
- * src-tauri/capabilities/default.json and `appName` the macOS app name it passes to `open -a`;
- * keep both in sync with that file.
+ * Desktop apps a project opener step can open a folder in (via `open -a <appName> <folder>`).
+ * Add an entry to offer another app in the New door dialog.
  */
 export const APPS = {
-  cursor: { label: "Cursor", appName: "Cursor", command: "open-in-cursor" },
-  vscode: { label: "VS Code", appName: "Visual Studio Code", command: "open-in-vscode" },
-  terminal: { label: "Terminal", appName: "Terminal", command: "open-in-terminal" },
+  cursor: { label: "Cursor", appName: "Cursor" },
+  vscode: { label: "VS Code", appName: "Visual Studio Code" },
+  terminal: { label: "Terminal", appName: "Terminal" }
 } as const;
 
 export type AppId = keyof typeof APPS;

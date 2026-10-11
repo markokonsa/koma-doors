@@ -1,21 +1,26 @@
 import { useSyncExternalStore } from "react";
-import { isPageId, type PageId } from "./pages";
 
-export interface Route {
-  page: PageId;
-  /** Optional second path segment, e.g. the project id in "#/projects/tc". */
-  param?: string;
-}
+/**
+ * Hash routes:
+ *   #/p/<projectId>   a project's doors (#/ = the last or first project)
+ *   #/script/<doorId> script editor
+ *   #/flow/<doorId>   a flow door, embedded
+ *   #/flow            the KOMA/flow builder, to make a new flow door
+ *   #/settings
+ */
+export type Route =
+  | { name: "project"; projectId?: string }
+  | { name: "script"; doorId: string }
+  | { name: "flow"; doorId?: string }
+  | { name: "settings" };
 
-// Tiny hash router: "#/" is home, "#/notes" is a page, "#/projects/tc" is a page with a param.
-// useSyncExternalStore needs a stable snapshot, so the hash is the snapshot and parsing happens outside.
-function readHash() {
-  return window.location.hash;
-}
-
-function parse(hash: string): Route | null {
-  const [id = "", param] = hash.replace(/^#\/?/, "").split("/");
-  return isPageId(id) ? { page: id, param: param ? decodeURIComponent(param) : undefined } : null;
+function parse(hash: string): Route {
+  const [name = "", id] = hash.replace(/^#\/?/, "").split("/").map((s) => decodeURIComponent(s));
+  if (name === "p") return { name: "project", projectId: id || undefined };
+  if (name === "script" && id) return { name: "script", doorId: id };
+  if (name === "flow") return { name: "flow", doorId: id || undefined };
+  if (name === "settings") return { name: "settings" };
+  return { name: "project" };
 }
 
 function subscribe(cb: () => void) {
@@ -23,11 +28,24 @@ function subscribe(cb: () => void) {
   return () => window.removeEventListener("hashchange", cb);
 }
 
-export function useRoute(): Route | null {
-  const hash = useSyncExternalStore(subscribe, readHash);
-  return parse(hash);
+export function useRoute(): Route {
+  // The hash string is the stable snapshot; parse outside the store.
+  return parse(useSyncExternalStore(subscribe, () => window.location.hash));
 }
 
-export function navigate(page: PageId | null, param?: string) {
-  window.location.hash = page ? `/${page}${param ? `/${encodeURIComponent(param)}` : ""}` : "/";
+export function routeHash(route: Route): string {
+  switch (route.name) {
+    case "project":
+      return route.projectId ? `#/p/${encodeURIComponent(route.projectId)}` : "#/";
+    case "script":
+      return `#/script/${encodeURIComponent(route.doorId)}`;
+    case "flow":
+      return route.doorId ? `#/flow/${encodeURIComponent(route.doorId)}` : "#/flow";
+    case "settings":
+      return "#/settings";
+  }
+}
+
+export function navigate(route: Route) {
+  window.location.hash = routeHash(route);
 }
