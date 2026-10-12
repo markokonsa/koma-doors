@@ -23,3 +23,11 @@ export function duration(ms: number): string {
 }
 
 export const basename = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+
+/** "500ms" / "5s" / "2m" / "1h" / plain milliseconds → ms; null when it can't be read. */
+export function parseDuration(value: string | undefined): number | null {
+  const m = /^(\d+(?:\.\d+)?)\s*(ms|s|m|h)?$/i.exec((value ?? "").trim());
+  if (!m) return null;
+  const unit = (m[2] ?? "ms").toLowerCase() as "ms" | "s" | "m" | "h";
+  return Math.round(Number(m[1]) * { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 }[unit]);
+}

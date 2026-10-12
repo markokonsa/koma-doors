@@ -5,6 +5,8 @@ import { APPS, APP_IDS, type AppId } from "../apps";
 import { doorsStore, findProject, newId } from "../doors/store";
 import { SCRIPT_TEMPLATES, SCRIPT_TEMPLATE_IDS, scriptFileName, type ScriptTemplateId } from "../doors/templates";
 import { importFlowFile } from "../doors/flows";
+import { RUNNABLE_KINDS, type DoorRetry, type DoorWebhooks } from "../doors/types";
+import { parseDuration } from "../lib/time";
 import { DOOR_KINDS, FLOW_BUILDER_URL, KIND_META, type Door, type DoorDraft, type DoorKind, type LaunchStep } from "../doors/types";
 import { inApp, readTextFile, scriptsDir, writeTextFile } from "../lib/native";
 import { toastError } from "../lib/toast";
@@ -171,7 +173,45 @@ export function DoorDialog({ projectId, door, kind: initialKind }: { projectId: 
   const [flowFile, setFlowFile] = useState(door?.kind === "flow" ? (door.file ?? "") : "");
   const [target, setTarget] = useState(door?.kind === "link" ? door.target : "");
   const [text, setText] = useState(door?.kind === "note" ? door.text : "");
+  const [retryCount, setRetryCount] = useState(String(door?.retry?.count ?? 0));
+  const [retryDelay, setRetryDelay] = useState(door?.retry?.delay ?? "5s");
+  const [hookStart, setHookStart] = useState(door?.webhooks?.onStart ?? "");
+  const [hookComplete, setHookComplete] = useState(door?.webhooks?.onComplete ?? "");
+  const [hookError, setHookError] = useState(door?.webhooks?.onError ?? "");
+  const [hookHeaders, setHookHeaders] = useState(door?.webhooks?.headers ? JSON.stringify(door.webhooks.headers, null, 2) : "");
   const [error, setError] = useState<string | null>(null);
+  const runnable = (RUNNABLE_KINDS as readonly DoorKind[]).includes(kind);
+
+  /** Retries and webhooks from the form, or what's wrong with them. */
+  const automation = (): { retry?: DoorRetry; webhooks?: DoorWebhooks } | string => {
+    const count = Number(retryCount || 0);
+    if (!Number.isInteger(count) || count < 0 || count > 10) return "Retries: a whole number from 0 to 10.";
+    if (count && parseDuration(retryDelay) == null) return "Delay between retries: e.g. 5s, 30s or 2m.";
+    const urls = { onStart: hookStart.trim(), onComplete: hookComplete.trim(), onError: hookError.trim() };
+    for (const u of Object.values(urls)) if (u && !/^https?:\/\/\S+$/.test(u)) return `Not a webhook URL: ${u}`;
+    let headers: Record<string, string> | undefined;
+    if (hookHeaders.trim()) {
+      try {
+        const h = JSON.parse(hookHeaders) as unknown;
+        if (!h || typeof h !== "object" || Array.isArray(h)) throw new Error();
+        headers = Object.fromEntries(Object.entries(h).map(([k, v]) => [k, String(v)]));
+      } catch {
+        return 'Webhook headers: a JSON object, e.g. {"Authorization": "Bearer …"}';
+      }
+    }
+    const any = urls.onStart || urls.onComplete || urls.onError;
+    return {
+      retry: count ? { count, delay: retryDelay.trim() } : undefined,
+      webhooks: any
+        ? {
+            ...(urls.onStart ? { onStart: urls.onStart } : {}),
+            ...(urls.onComplete ? { onComplete: urls.onComplete } : {}),
+            ...(urls.onError ? { onError: urls.onError } : {}),
+            ...(headers ? { headers } : {}),
+          }
+        : undefined,
+    };
+  };
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   // New scripts go to <app data>/scripts/<project>/<title>.mjs unless you pick a file.
@@ -206,7 +246,9 @@ export function DoorDialog({ projectId, door, kind: initialKind }: { projectId: 
   const draft = (): DoorDraft | string => {
     const t = title.trim();
     if (!t) return "Give the door a name.";
-    const base = { projectId, title: t, lastRunAt: door?.lastRunAt };
+    const auto = runnable ? automation() : {};
+    if (typeof auto === "string") return auto;
+    const base = { projectId, title: t, lastRunAt: door?.lastRunAt, ...auto };
     switch (kind) {
       case "launch": {
         const clean = steps.filter((s) => (s.kind === "shell" ? s.cmd.trim() : s.kind === "url" ? s.url.trim() : true));
@@ -448,6 +490,45 @@ export function DoorDialog({ projectId, door, kind: initialKind }: { projectId: 
               <Field label="Note" htmlFor="door-text">
                 <textarea id="door-text" value={text} onChange={(e) => setText(e.target.value)} rows={8} className="field" />
               </Field>
+            )}
+
+            {runnable && (kind !== "flow" || flowFile.trim() || (door?.kind === "flow" && door.file)) && (
+              <details className="rounded-sm border border-line" open={!!(door?.retry?.count || door?.webhooks)}>
+                <summary className="flex cursor-pointer items-center justify-between px-4 py-3">
+                  <span className="label">Retries &amp; webhooks</span>
+                  <span className="font-mono text-[11px] text-ink-dim">
+                    {Number(retryCount) ? `↻ ${retryCount}× · ${retryDelay}` : "no retries"}
+                    {hookStart || hookComplete || hookError ? " · ↗ webhooks" : ""}
+                  </span>
+                </summary>
+                <div className="flex flex-col gap-4 border-t border-line px-4 py-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Retries on failure" htmlFor="door-retry">
+                      <input id="door-retry" type="number" min={0} max={10} value={retryCount} onChange={(e) => setRetryCount(e.target.value)} className="field field-mono" />
+                    </Field>
+                    <Field label="Delay between" htmlFor="door-delay">
+                      <input id="door-delay" value={retryDelay} disabled={!Number(retryCount)} onChange={(e) => setRetryDelay(e.target.value)} placeholder="5s" className="field field-mono disabled:opacity-50" />
+                    </Field>
+                  </div>
+                  <Field label="onStart webhook" htmlFor="door-hook-start">
+                    <input id="door-hook-start" value={hookStart} onChange={(e) => setHookStart(e.target.value)} placeholder="https://…" className="field field-mono" />
+                  </Field>
+                  <Field label="onComplete webhook" htmlFor="door-hook-complete">
+                    <input id="door-hook-complete" value={hookComplete} onChange={(e) => setHookComplete(e.target.value)} placeholder="https://…" className="field field-mono" />
+                  </Field>
+                  <Field label="onError webhook" htmlFor="door-hook-error">
+                    <input id="door-hook-error" value={hookError} onChange={(e) => setHookError(e.target.value)} placeholder="https://hooks.slack.com/services/…" className="field field-mono" />
+                  </Field>
+                  <Field label="Webhook headers (JSON, optional)" htmlFor="door-hook-headers">
+                    <textarea id="door-hook-headers" rows={2} spellCheck={false} value={hookHeaders} onChange={(e) => setHookHeaders(e.target.value)} placeholder='{"Authorization": "Bearer …"}' className="field field-mono" />
+                  </Field>
+                  <p className="text-[13px] leading-relaxed text-ink-dim">
+                    Each URL gets a JSON POST with <code className="font-mono text-ink">event</code>, a ready-to-post{" "}
+                    <code className="font-mono text-ink">text</code> (works with Slack incoming webhooks), the door, project, run (attempt,
+                    duration), error and the last log lines. onError is sent once, after the last retry has failed.
+                  </p>
+                </div>
+              </details>
             )}
 
             {error && (

@@ -47,6 +47,20 @@ function CardShell({ door, running, className, children, onOpen }: { door: Door;
   );
 }
 
+/** ↻2 = retries twice, ↗ = sends webhooks. */
+function Extras({ door }: { door: Door }) {
+  const hooks = door.webhooks && (door.webhooks.onStart || door.webhooks.onComplete || door.webhooks.onError);
+  if (!door.retry?.count && !hooks) return null;
+  const title = [door.retry?.count ? `Retries ${door.retry.count}× every ${door.retry.delay}` : "", hooks ? "Sends webhooks" : ""].filter(Boolean).join(" · ");
+  return (
+    <span className="whitespace-nowrap font-mono text-[11px] text-ink-dim" title={title}>
+      {door.retry?.count ? `↻${door.retry.count}` : ""}
+      {door.retry?.count && hooks ? " " : ""}
+      {hooks ? "↗" : ""}
+    </span>
+  );
+}
+
 function Status({ running, lastRunAt }: { running: boolean; lastRunAt?: number }) {
   return (
     <span className={cn("whitespace-nowrap font-mono text-[11px]", running ? "text-brand-hover" : "text-ink-dim")}>
@@ -79,6 +93,7 @@ export function LaunchCard({ door, project }: { door: LaunchDoor; project: Proje
         </span>
       </span>
       <span className="flex flex-col items-end gap-1.5 self-end">
+        <Extras door={door} />
         <Status running={running} lastRunAt={door.lastRunAt} />
       </span>
     </CardShell>
@@ -101,7 +116,10 @@ export function AutomationCard({ door, project, shortcut }: { door: ScriptDoor |
     <CardShell door={door} running={running} onOpen={() => open(door, project)} className="h-[112px] flex-col justify-between px-[18px] py-4">
       <span className="flex w-full items-center justify-between">
         <span className={cn("tag", flow && "tag-brand")}>{KIND_META[door.kind].tag}</span>
-        {shortcut != null && <span className="font-mono text-[11px] text-ink-dim">⌘{shortcut}</span>}
+        <span className="flex items-center gap-2">
+          <Extras door={door} />
+          {shortcut != null && <span className="font-mono text-[11px] text-ink-dim">⌘{shortcut}</span>}
+        </span>
       </span>
       <span className="flex w-full flex-col gap-1.5">
         <span className="truncate text-[16px] font-medium text-ink">{door.title}</span>

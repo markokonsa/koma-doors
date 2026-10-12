@@ -105,7 +105,10 @@ export function RunRail() {
         <>
           <div className="flex flex-col gap-2.5 border-b border-line-soft px-5 pb-4 pt-5">
             <div className="flex items-center justify-between">
-              <span className="eyebrow">{run.status === "running" ? "Now running" : "Last run"}</span>
+              <span className="eyebrow">
+                {run.status === "running" ? "Now running" : "Last run"}
+                {run.attempts > 1 ? ` · attempt ${run.attempt}/${run.attempts}` : ""}
+              </span>
               <RunStatus status={run.status} />
             </div>
             <span className="display text-[22px]">{run.title}</span>

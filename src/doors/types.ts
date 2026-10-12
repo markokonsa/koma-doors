@@ -13,13 +13,35 @@ export type LaunchStep =
   /** Open a URL in the default browser. */
   | { id: string; kind: "url"; url: string };
 
+/** Outgoing webhooks of a runnable door: each URL gets a JSON POST when that happens. */
+export interface DoorWebhooks {
+  onStart?: string;
+  onComplete?: string;
+  /** Sent once all retries have failed. */
+  onError?: string;
+  /** Extra request headers, e.g. Authorization. */
+  headers?: Record<string, string>;
+}
+
+/** Re-run a failed opener/script/flow `count` more times, waiting `delay` ("5s", "1m") in between. */
+export interface DoorRetry {
+  count: number;
+  delay: string;
+}
+
 interface DoorBase {
   id: string;
   projectId: string;
   title: string;
   /** Epoch ms of the last time the door was opened or run. */
   lastRunAt?: number;
+  /** Openers, scripts and flows with a file only. */
+  webhooks?: DoorWebhooks;
+  retry?: DoorRetry;
 }
+
+/** Door kinds that run (and so can have webhooks and retries). */
+export const RUNNABLE_KINDS = ["launch", "script", "flow"] as const;
 
 export interface LaunchDoor extends DoorBase {
   kind: "launch";

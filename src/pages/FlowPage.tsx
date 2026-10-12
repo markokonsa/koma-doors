@@ -8,6 +8,7 @@ import type { FlowDoor } from "../doors/types";
 import { inApp, openTarget, readTextFile, writeTextFile } from "../lib/native";
 import { basename } from "../lib/time";
 import { toast, toastError } from "../lib/toast";
+import { openDoorDialog } from "../lib/ui";
 import { navigate } from "../router";
 
 /** Messages from the builder (see src/lib/workflow/bridge.ts in KOMA/flow). */
@@ -234,6 +235,15 @@ export function FlowPage({ doorId, currentProjectId }: { doorId?: string; curren
                     Runs with bun if installed, else node. Supabase keys come from the project's environment (Edit project).
                   </span>
                 </div>
+              )}
+              {door?.file && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm self-start"
+                  onClick={() => openDoorDialog({ projectId: door.projectId, door })}
+                >
+                  Webhooks &amp; retries…
+                </button>
               )}
               {error && (
                 <p role="alert" className="text-[14px] text-danger">

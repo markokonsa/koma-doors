@@ -14,7 +14,8 @@ import {
   runProcess,
   waitForPort,
 } from "../lib/native";
-import { basename } from "../lib/time";
+import { basename, duration, parseDuration } from "../lib/time";
+import { postJson } from "../lib/webhooks";
 import { getProjectEnv } from "./env";
 import { FLOW_RUNNER } from "./flows";
 import { doorsStore, newId } from "./store";
@@ -44,6 +45,9 @@ export interface Run {
   log: LogLine[];
   startedAt: number;
   endedAt?: number;
+  /** 1-based; above 1 after a retry. */
+  attempt: number;
+  attempts: number;
 }
 
 const MAX_RUNS = 20;
@@ -193,8 +197,22 @@ export async function stopRun(runId: string) {
 
 // ---- running doors ------------------------------------------------------------------------------
 
+type Outcome = "ok" | "failed" | "stopped";
+
 function createRun(door: Door, subtitle: string, steps: RunStep[]): Run {
-  const run: Run = { id: newId(), doorId: door.id, title: door.title, subtitle, status: "running", steps, log: [], startedAt: Date.now() };
+  const attempts = 1 + Math.max(0, Math.min(10, door.retry?.count ?? 0));
+  const run: Run = {
+    id: newId(),
+    doorId: door.id,
+    title: door.title,
+    subtitle,
+    status: "running",
+    steps,
+    log: [],
+    startedAt: Date.now(),
+    attempt: 1,
+    attempts,
+  };
   const keep = snap.runs.filter((r) => r.status === "running");
   const rest = snap.runs.filter((r) => r.status !== "running");
   set({ runs: [run, ...keep, ...rest].slice(0, Math.max(MAX_RUNS, keep.length + 1)), selectedId: run.id });
@@ -247,29 +265,125 @@ export async function runDoor(door: Door, project: Project | undefined): Promise
   }
 }
 
+// ---- webhooks -----------------------------------------------------------------------------------
+
+type HookEvent = "start" | "complete" | "error";
+const HOOK_URL: Record<HookEvent, "onStart" | "onComplete" | "onError"> = { start: "onStart", complete: "onComplete", error: "onError" };
+
+/** POST the door's webhook for this event, if it has one. Never throws; the result goes to the run log. */
+function sendWebhook(event: HookEvent, door: Door, project: Project | undefined, runId: string, error?: string) {
+  const url = door.webhooks?.[HOOK_URL[event]];
+  const run = getRun(runId);
+  if (!url || !run) return;
+  const took = run.endedAt ? duration(run.endedAt - run.startedAt) : undefined;
+  const where = `${project ? `${project.title} / ` : ""}${door.title}`;
+  const body = {
+    event,
+    // Plain-text summary, so Slack/Discord-style incoming webhooks show something useful as is.
+    text:
+      event === "start"
+        ? `▶ ${where} started`
+        : event === "complete"
+          ? `✓ ${where} finished${took ? ` in ${took}` : ""}`
+          : `✗ ${where} failed${run.attempts > 1 ? ` after ${run.attempts} attempts` : ""}: ${error ?? "error"}`,
+    door: { id: door.id, title: door.title, kind: door.kind },
+    project: project ? { id: project.id, title: project.title } : null,
+    run: {
+      id: run.id,
+      status: event === "start" ? "running" : event === "complete" ? "done" : "failed",
+      attempt: run.attempt,
+      attempts: run.attempts,
+      startedAt: new Date(run.startedAt).toISOString(),
+      endedAt: run.endedAt ? new Date(run.endedAt).toISOString() : null,
+      durationMs: run.endedAt ? run.endedAt - run.startedAt : null,
+    },
+    error: error ?? null,
+    /** The last lines of output. */
+    log: run.log.slice(-30).map((l) => l.text),
+  };
+  postJson(url, body, door.webhooks?.headers)
+    .then(() => log(runId, `↗ ${event} webhook sent`, "info"))
+    .catch((e: unknown) => log(runId, `↗ ${event} webhook failed: ${e instanceof Error ? e.message : String(e)}`, "err"));
+}
+
+// ---- attempts -----------------------------------------------------------------------------------
+
+const isRunning = (runId: string) => getRun(runId)?.status === "running";
+
+/** Wait, but give up as soon as the run is stopped. */
+async function waitUnlessStopped(runId: string, ms: number) {
+  const until = Date.now() + ms;
+  while (Date.now() < until && isRunning(runId)) await new Promise((r) => setTimeout(r, Math.min(250, until - Date.now())));
+  return isRunning(runId);
+}
+
+/**
+ * Run `attempt` up to 1 + retry.count times. Webhooks: start once, complete on success, error once the
+ * last attempt has failed. Processes left by a failed attempt are stopped before the next one.
+ */
+async function withRetries(
+  door: Door,
+  project: Project | undefined,
+  run: Run,
+  resetSteps: () => RunStep[],
+  attempt: () => Promise<{ outcome: Outcome; error?: string }>,
+  onSuccess: () => void,
+) {
+  const delayMs = parseDuration(door.retry?.delay) ?? 5_000;
+  sendWebhook("start", door, project, run.id);
+  let lastError = "failed";
+  for (let n = 1; n <= run.attempts; n++) {
+    if (n > 1) {
+      log(run.id, `↻ attempt ${n}/${run.attempts} in ${duration(delayMs)}`, "info");
+      await Promise.all([...(runProcs.get(run.id) ?? [])].map((id) => killProcess(id).catch(() => undefined)));
+      if (!(await waitUnlessStopped(run.id, delayMs))) return;
+      patch(run.id, (r) => ({ ...r, attempt: n, steps: resetSteps() }));
+    }
+    const { outcome, error } = await attempt();
+    if (outcome === "stopped" || !isRunning(run.id)) return;
+    if (outcome === "ok") {
+      onSuccess();
+      sendWebhook("complete", door, project, run.id);
+      return;
+    }
+    lastError = error ?? lastError;
+  }
+  // Nothing can Stop a failed run, so don't leave its background processes behind.
+  await Promise.all([...(runProcs.get(run.id) ?? [])].map((id) => killProcess(id).catch(() => undefined)));
+  finish(run.id, "failed");
+  sendWebhook("error", door, project, run.id, lastError);
+}
+
+const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+// ---- scripts and flows --------------------------------------------------------------------------
+
 /** Run one file through the login shell as a single-step run. */
 async function runFile(
   door: Door & { file: string },
   project: Project | undefined,
   opts: { label: string; command: string; script: string; env?: Record<string, string>; hint?: string },
 ) {
-  const run = createRun(door, door.file, [{ label: opts.label, status: "run", startedAt: Date.now() }]);
-  loopDone.add(run.id);
-  log(run.id, `$ ${opts.command} ${door.file}`, "cmd");
-  if (opts.hint) log(run.id, opts.hint, "info");
-  try {
-    const env = { ...(await doorEnv(door, project)), ...opts.env, DOOR_FILE: await expandHome(door.file) };
-    const { exited } = await startProcess(run.id, opts.script, project?.path, env);
-    const code = await exited;
-    if (getRun(run.id)?.status !== "running") return;
-    setStep(run.id, 0, { status: code === 0 ? "done" : "fail" });
-    log(run.id, code === 0 ? "✓ exit 0" : `✗ exit ${code ?? "signal"}`, code === 0 ? "ok" : "err");
-    finish(run.id, code === 0 ? "done" : "failed");
-  } catch (e) {
-    setStep(run.id, 0, { status: "fail" });
-    log(run.id, e instanceof Error ? e.message : String(e), "err");
-    finish(run.id, "failed");
-  }
+  const steps = () => [{ label: opts.label, status: "run" as const, startedAt: Date.now() }];
+  const run = createRun(door, door.file, steps());
+  const attempt = async (): Promise<{ outcome: Outcome; error?: string }> => {
+    log(run.id, `$ ${opts.command} ${door.file}`, "cmd");
+    if (opts.hint) log(run.id, opts.hint, "info");
+    try {
+      const env = { ...(await doorEnv(door, project)), ...opts.env, DOOR_FILE: await expandHome(door.file) };
+      const { exited } = await startProcess(run.id, opts.script, project?.path, env);
+      const code = await exited;
+      if (!isRunning(run.id)) return { outcome: "stopped" };
+      setStep(run.id, 0, { status: code === 0 ? "done" : "fail" });
+      log(run.id, code === 0 ? "✓ exit 0" : `✗ exit ${code ?? "signal"}`, code === 0 ? "ok" : "err");
+      return code === 0 ? { outcome: "ok" } : { outcome: "failed", error: `exit ${code ?? "signal"}` };
+    } catch (e) {
+      setStep(run.id, 0, { status: "fail" });
+      log(run.id, message(e), "err");
+      return { outcome: "failed", error: message(e) };
+    }
+  };
+  await withRetries(door, project, run, steps, attempt, () => finish(run.id, "done"));
 }
 
 async function runScript(door: ScriptDoor, project: Project | undefined) {
@@ -285,74 +399,78 @@ async function runFlow(door: FlowDoor & { file: string }, project: Project | und
     command: "bun || node",
     script: FLOW_RUNNER,
     env: { DOOR_DEPS: `${await appDataDir()}/scripts` },
-    hint: env.SUPABASE_ANON_KEY ? undefined : "No SUPABASE_ANON_KEY for this project: add it under Edit project → Environment.",
+    hint: env.SUPABASE_ANON_KEY ? undefined : "… no SUPABASE_ANON_KEY for this project: add it under Edit project → Environment if the flow uses Supabase.",
   });
 }
+
+// ---- project openers ----------------------------------------------------------------------------
 
 async function runLaunch(door: LaunchDoor, project: Project | undefined) {
   requireApp("Project openers");
   const where = project?.path ?? "no project folder";
-  const run = createRun(
-    door,
-    `${door.steps.length} step${door.steps.length === 1 ? "" : "s"} · ${where}`,
-    door.steps.map((s) => ({ label: stepLabel(s), status: "wait" })),
-  );
+  const steps = () => door.steps.map((s): RunStep => ({ label: stepLabel(s), status: "wait" }));
+  const run = createRun(door, `${door.steps.length} step${door.steps.length === 1 ? "" : "s"} · ${where}`, steps());
   const env = await doorEnv(door, project);
 
-  for (const [i, step] of door.steps.entries()) {
-    if (getRun(run.id)?.status !== "running") return;
-    setStep(run.id, i, { status: "run", startedAt: Date.now() });
-    try {
-      if (step.kind === "url") {
-        log(run.id, `$ open ${step.url}`, "cmd");
-        await openTarget(step.url);
-        setStep(run.id, i, { status: "done" });
-      } else if (step.kind === "app") {
-        const app = APPS[step.app];
-        const path = step.path || project?.path;
-        if (!path) throw new Error(`Set the project folder first, or give this step a path`);
-        log(run.id, `$ open -a "${app.appName}" ${path}`, "cmd");
-        const { exited } = await startProcess(run.id, 'open -a "$DOOR_APP" "$DOOR_PATH"', undefined, {
-          ...env,
-          DOOR_APP: app.appName,
-          DOOR_PATH: await expandHome(path),
-        });
-        const code = await exited;
-        if (code !== 0) throw new Error(`Could not open ${app.label} (exit ${code})`);
-        setStep(run.id, i, { status: "done" });
-      } else {
-        log(run.id, `$ ${step.cmd}`, "cmd");
-        const { exited: done } = await startProcess(run.id, step.cmd, project?.path, env);
-        if (!step.background) {
-          const code = await done;
-          if (getRun(run.id)?.status !== "running") return;
-          if (code !== 0) throw new Error(`exit ${code ?? "signal"}`);
+  const attempt = async (): Promise<{ outcome: Outcome; error?: string }> => {
+    for (const [i, step] of door.steps.entries()) {
+      if (!isRunning(run.id)) return { outcome: "stopped" };
+      setStep(run.id, i, { status: "run", startedAt: Date.now() });
+      try {
+        if (step.kind === "url") {
+          log(run.id, `$ open ${step.url}`, "cmd");
+          await openTarget(step.url);
           setStep(run.id, i, { status: "done" });
-        } else if (step.waitPort) {
-          log(run.id, `… waiting for localhost:${step.waitPort}`, "info");
-          const result = await Promise.race([
-            waitForPort(step.waitPort, PORT_TIMEOUT_MS).then((up) => (up ? "up" : "timeout")),
-            done.then(() => "exited" as const),
-          ]);
-          if (getRun(run.id)?.status !== "running") return;
-          if (result === "exited") throw new Error(`stopped before localhost:${step.waitPort} opened`);
-          if (result === "timeout") throw new Error(`localhost:${step.waitPort} did not open in time`);
-          log(run.id, `✓ localhost:${step.waitPort} is up`, "ok");
-          setStep(run.id, i, { status: "bg" });
+        } else if (step.kind === "app") {
+          const app = APPS[step.app];
+          const path = step.path || project?.path;
+          if (!path) throw new Error(`Set the project folder first, or give this step a path`);
+          log(run.id, `$ open -a "${app.appName}" ${path}`, "cmd");
+          const { exited } = await startProcess(run.id, 'open -a "$DOOR_APP" "$DOOR_PATH"', undefined, {
+            ...env,
+            DOOR_APP: app.appName,
+            DOOR_PATH: await expandHome(path),
+          });
+          const code = await exited;
+          if (code !== 0) throw new Error(`Could not open ${app.label} (exit ${code})`);
+          setStep(run.id, i, { status: "done" });
         } else {
-          setStep(run.id, i, { status: "bg" });
+          log(run.id, `$ ${step.cmd}`, "cmd");
+          const { exited } = await startProcess(run.id, step.cmd, project?.path, env);
+          if (!step.background) {
+            const code = await exited;
+            if (!isRunning(run.id)) return { outcome: "stopped" };
+            if (code !== 0) throw new Error(`exit ${code ?? "signal"}`);
+            setStep(run.id, i, { status: "done" });
+          } else if (step.waitPort) {
+            log(run.id, `… waiting for localhost:${step.waitPort}`, "info");
+            const result = await Promise.race([
+              waitForPort(step.waitPort, PORT_TIMEOUT_MS).then((up) => (up ? "up" : "timeout")),
+              exited.then(() => "exited" as const),
+            ]);
+            if (!isRunning(run.id)) return { outcome: "stopped" };
+            if (result === "exited") throw new Error(`stopped before localhost:${step.waitPort} opened`);
+            if (result === "timeout") throw new Error(`localhost:${step.waitPort} did not open in time`);
+            log(run.id, `✓ localhost:${step.waitPort} is up`, "ok");
+            setStep(run.id, i, { status: "bg" });
+          } else {
+            setStep(run.id, i, { status: "bg" });
+          }
         }
+      } catch (e) {
+        if (!isRunning(run.id)) return { outcome: "stopped" };
+        setStep(run.id, i, { status: "fail" });
+        log(run.id, `✗ ${message(e)}`, "err");
+        patch(run.id, (r) => ({ ...r, steps: r.steps.map((s) => (s.status === "wait" ? { ...s, status: "skip" as const } : s)) }));
+        return { outcome: "failed", error: `${stepLabel(step)}: ${message(e)}` };
       }
-    } catch (e) {
-      if (getRun(run.id)?.status !== "running") return;
-      setStep(run.id, i, { status: "fail" });
-      log(run.id, `✗ ${e instanceof Error ? e.message : String(e)}`, "err");
-      // Leave background processes running; the user can Stop them from the rail.
-      patch(run.id, (r) => ({ ...r, steps: r.steps.map((s) => (s.status === "wait" ? { ...s, status: "skip" as const } : s)) }));
-      finish(run.id, "failed");
-      return;
     }
-  }
-  loopDone.add(run.id);
-  settleIfIdle(run.id);
+    return { outcome: "ok" };
+  };
+
+  // Success = every step started; the run stays "live" while background steps (dev servers) keep running.
+  await withRetries(door, project, run, steps, attempt, () => {
+    loopDone.add(run.id);
+    settleIfIdle(run.id);
+  });
 }
