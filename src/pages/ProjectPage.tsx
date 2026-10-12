@@ -54,6 +54,10 @@ export function ProjectPage({ project }: { project: Project | undefined }) {
   const autos = automationDoors(doors, project.id);
   const links = mine.filter((d) => d.kind === "link");
   const notes = mine.filter((d) => d.kind === "note");
+  const flows = mine.filter((d) => d.kind === "flow");
+  const tasks = mine.filter((d: any) => d.kind === "task");
+  const lists = mine.filter((d: any) => d.kind === "list");
+
 
   return (
     <div className="flex flex-col gap-7 px-9 py-7">

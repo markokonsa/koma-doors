@@ -21,6 +21,8 @@ const DEFAULT_TITLE: Record<DoorKind, string> = {
   flow: "",
   link: "",
   note: "",
+  task: "",
+  list: "",
 };
 
 function Field({ label, htmlFor, children }: { label: string; htmlFor?: string; children: ReactNode }) {
@@ -243,7 +245,7 @@ export function DoorDialog({ projectId, door, kind: initialKind }: { projectId: 
     }
   };
 
-  const draft = (): DoorDraft | string => {
+  const draft = (): any => {
     const t = title.trim();
     if (!t) return "Give the door a name.";
     const auto = runnable ? automation() : {};

@@ -1,7 +1,7 @@
 import type { AppId } from "../apps";
 
 /** What a door does when its card is clicked. */
-export type DoorKind = "launch" | "script" | "flow" | "link" | "note";
+export type DoorKind = "launch" | "script" | "flow" | "link" | "note" | "task" | "list";
 
 /** One step of a project opener (launch door). Steps run in order and stop at the first failure. */
 export type LaunchStep =
@@ -72,6 +72,11 @@ export interface NoteDoor extends DoorBase {
   text: string;
 }
 
+export interface TaskDoor extends DoorBase {
+  kind: "task";
+  text: string;
+}
+
 export type Door = LaunchDoor | ScriptDoor | FlowDoor | LinkDoor | NoteDoor;
 
 /** `Omit` that keeps the union: a draft of any door kind, without its id. */
@@ -89,11 +94,13 @@ export interface Project {
 export const FLOW_BUILDER_URL = "https://workflows.konsa.ee/";
 
 export const KIND_META: Record<DoorKind, { num: string; label: string; tag: string; desc: string }> = {
-  launch: { num: "01", label: "Project opener", tag: "LAUNCH", desc: "Open an editor, start local services, open the app." },
+  launch: { num: "01",   label: "Project opener", tag: "LAUNCH", desc: "Open an editor, start local services, open the app." },
   script: { num: "02", label: "JS script", tag: "JS", desc: "A .js file run with node. Edit it here, run it from the card." },
   flow: { num: "03", label: "Flow", tag: "FLOW", desc: "A workflow built in KOMA/flow, saved as a one-click door." },
   link: { num: "04", label: "Link", tag: "LINK", desc: "Bitbucket, Jira, dashboards, a local folder: any URL or path." },
   note: { num: "05", label: "Note", tag: "NOTE", desc: "Plain text you keep next to the project." },
+  task: { num: "06", label: "Task", tag: "TASK", desc: "A task you need to complete." },
+  list: { num: "07", label: "List", tag: "LIST", desc: "A list of items you need to complete." },
 };
 
 export const DOOR_KINDS = Object.keys(KIND_META) as DoorKind[];
