@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { hydrateProjectEnv } from "./doors/env";
 import { hydrateDoors } from "./doors/store";
 
 import "@fontsource/barlow-semi-condensed/500.css";
@@ -14,7 +15,7 @@ import "@fontsource/jetbrains-mono/500.css";
 import "./input.css";
 
 // Load projects and doors from the data file before the first render, so the app never flashes stale data.
-void hydrateDoors().finally(() => {
+void Promise.all([hydrateDoors(), hydrateProjectEnv()]).finally(() => {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <App />

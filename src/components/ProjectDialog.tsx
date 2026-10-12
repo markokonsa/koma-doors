@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { FolderSearch, Trash2, X } from "lucide-react";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
+import { formatEnv, getProjectEnv, parseEnv, setProjectEnv } from "../doors/env";
 import { doorsStore, getDoorsState } from "../doors/store";
 import type { Project } from "../doors/types";
 import { inApp } from "../lib/native";
@@ -13,6 +14,7 @@ export function ProjectDialog({ project }: { project?: Project }) {
   const [title, setTitle] = useState(project?.title ?? "");
   const [description, setDescription] = useState(project?.description ?? "");
   const [path, setPath] = useState(project?.path ?? "");
+  const [envText, setEnvText] = useState(() => formatEnv(getProjectEnv(project?.id)));
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const doorCount = project ? getDoorsState().doors.filter((d) => d.projectId === project.id).length : 0;
@@ -33,11 +35,14 @@ export function ProjectDialog({ project }: { project?: Project }) {
     const t = title.trim();
     if (!t) return setError("Give the project a name.");
     const fields = { title: t, description: description.trim() || undefined, path: path.trim() || undefined };
+    const saveEnv = (id: string) => setProjectEnv(id, parseEnv(envText)).catch(toastError);
     if (project) {
       doorsStore.updateProject({ ...project, ...fields });
+      void saveEnv(project.id);
       closeOverlays();
     } else {
       const created = doorsStore.addProject(fields);
+      void saveEnv(created.id);
       closeOverlays();
       navigate({ name: "project", projectId: created.id });
     }
@@ -47,6 +52,7 @@ export function ProjectDialog({ project }: { project?: Project }) {
     if (!project) return;
     if (!confirmDelete) return setConfirmDelete(true);
     doorsStore.removeProject(project.id);
+    void setProjectEnv(project.id, {}).catch(toastError);
     closeOverlays();
     navigate({ name: "project" });
   };
@@ -95,6 +101,24 @@ export function ProjectDialog({ project }: { project?: Project }) {
               Description
             </label>
             <input id="project-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional" className="field" />
+          </div>
+          <div className="flex flex-col gap-2">
+            <label htmlFor="project-env" className="label">
+              Environment
+            </label>
+            <textarea
+              id="project-env"
+              value={envText}
+              onChange={(e) => setEnvText(e.target.value)}
+              rows={4}
+              spellCheck={false}
+              placeholder={"SUPABASE_URL=http://127.0.0.1:54321\nSUPABASE_ANON_KEY=…"}
+              className="field field-mono"
+            />
+            <span className="text-[13px] text-ink-dim">
+              KEY=value per line, passed to this project's scripts, flows and shell steps. Flows read SUPABASE_URL, SUPABASE_ANON_KEY,
+              SUPABASE_SERVICE_ROLE_KEY and WF_PASSWORD. Kept in project-env.json in the app data folder, never in doors.json.
+            </span>
           </div>
           {error && (
             <p role="alert" className="text-[14px] text-danger">

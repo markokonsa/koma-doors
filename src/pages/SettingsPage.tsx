@@ -1,7 +1,9 @@
 import { useState, type ReactNode } from "react";
 import { FolderOpen, FolderSearch, RotateCcw } from "lucide-react";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
+import { getBuilderUrl, setBuilderUrl } from "../doors/flows";
 import { getDataFilePath, moveDataFile } from "../doors/store";
+import { FLOW_BUILDER_URL } from "../doors/types";
 import { inApp, openTarget } from "../lib/native";
 import { toast, toastError } from "../lib/toast";
 
@@ -65,6 +67,45 @@ function DataLocation() {
   );
 }
 
+function BuilderAddress() {
+  const [value, setValue] = useState(getBuilderUrl());
+  const save = () => {
+    try {
+      const url = new URL(value.trim()).toString();
+      setBuilderUrl(url);
+      setValue(getBuilderUrl());
+      toast(`Flow builder: ${url}`, "info");
+    } catch {
+      toast("That isn't a URL.");
+    }
+  };
+  return (
+    <>
+      <p>
+        Flow doors keep the <code>.mjs</code> KOMA/flow exports. Clicking the card runs it (with <code>bun</code> if installed, else{" "}
+        <code>node</code>; <code>@supabase/supabase-js</code> is installed once on first run); the pencil reopens it in the builder and
+        Save flow writes it back. Supabase keys come from each project's environment (Edit project).
+      </p>
+      <div className="flex gap-2">
+        <input aria-label="Flow builder address" value={value} onChange={(e) => setValue(e.target.value)} className="field field-mono" />
+        <button className="btn btn-ghost" onClick={save}>
+          Save
+        </button>
+        <button
+          className="btn btn-ghost"
+          onClick={() => {
+            setBuilderUrl(null);
+            setValue(FLOW_BUILDER_URL);
+          }}
+        >
+          Default
+        </button>
+      </div>
+      <p className="text-[13px]">Use your local dev server (e.g. http://localhost:3000) to try builder changes before deploying them.</p>
+    </>
+  );
+}
+
 export function SettingsPage() {
   return (
     <div className="flex max-w-[760px] flex-col gap-7 px-9 py-7">
@@ -93,9 +134,7 @@ export function SettingsPage() {
         </p>
       </Block>
       <Block num="04" title="Flows">
-        <p>
-          KOMA/flow (<code>workflows.konsa.ee</code>) opens inside the app. Build a flow, then Save as door to pin it to a project.
-        </p>
+        <BuilderAddress />
       </Block>
       <Block num="05" title="Keyboard">
         <p>

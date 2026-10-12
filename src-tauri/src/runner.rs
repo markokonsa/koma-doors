@@ -236,6 +236,12 @@ pub fn set_data_file(app: AppHandle, path: Option<String>) -> Result<String, Str
     data_file(app)
 }
 
+/// The app's data folder (`~/Library/Application Support/ee.konsa.home` on macOS).
+#[tauri::command]
+pub fn app_data_dir(app: AppHandle) -> Result<String, String> {
+    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.to_string_lossy().into_owned())
+}
+
 /// Where new door scripts live: `<app data>/scripts/<project id>/`.
 #[tauri::command]
 pub fn scripts_dir(app: AppHandle, project_id: String) -> Result<String, String> {

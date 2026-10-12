@@ -31,10 +31,14 @@ export interface ScriptDoor extends DoorBase {
   /** Absolute path (or ~/…) of the .mjs/.js file. */
   file: string;
 }
-/** A workflow built in KOMA/flow; opens embedded in the app. */
+/**
+ * A workflow built in KOMA/flow. `file` is its exported .mjs: clicking the card runs it (bun, or node),
+ * Edit reopens it in the builder. A flow door without a file just opens the builder at `url`.
+ */
 export interface FlowDoor extends DoorBase {
   kind: "flow";
-  url: string;
+  file?: string;
+  url?: string;
 }
 /** A URL (opens in the browser) or a local path (opens with the OS handler). */
 export interface LinkDoor extends DoorBase {

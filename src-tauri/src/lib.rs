@@ -22,6 +22,7 @@ pub fn run() {
             runner::scripts_dir,
             runner::data_file,
             runner::set_data_file,
+            runner::app_data_dir,
         ])
         .build(tauri::generate_context!())
         .expect("error while building KOMA Home")

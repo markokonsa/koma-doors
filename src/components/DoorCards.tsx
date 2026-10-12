@@ -17,9 +17,10 @@ function useIsRunning(doorId: string) {
 
 const open = (door: Door, project: Project) => runDoor(door, project).catch(toastError);
 
-/** Script doors edit in the script editor; everything else in the door dialog. */
+/** Scripts edit in the script editor, flows in the builder; everything else in the door dialog. */
 export function editDoor(door: Door) {
   if (door.kind === "script") navigate({ name: "script", doorId: door.id });
+  else if (door.kind === "flow") navigate({ name: "flow", doorId: door.id });
   else openDoorDialog({ projectId: door.projectId, door });
 }
 
@@ -105,7 +106,7 @@ export function AutomationCard({ door, project, shortcut }: { door: ScriptDoor |
       <span className="flex w-full flex-col gap-1.5">
         <span className="truncate text-[16px] font-medium text-ink">{door.title}</span>
         <span className="flex justify-between gap-2">
-          <span className="truncate font-mono text-[11px] text-ink-dim">{flow ? flowLabel(door.url) : basename(door.file)}</span>
+          <span className="truncate font-mono text-[11px] text-ink-dim">{door.kind === "flow" ? (door.file ? basename(door.file) : `builder · ${flowLabel(door.url ?? "")}`) : basename(door.file)}</span>
           <Status running={running} lastRunAt={door.lastRunAt} />
         </span>
       </span>

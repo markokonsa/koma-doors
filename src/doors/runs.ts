@@ -3,6 +3,7 @@ import { useSyncExternalStore } from "react";
 import { APPS } from "../apps";
 import { navigate } from "../router";
 import {
+  appDataDir,
   expandHome,
   inApp,
   killProcess,
@@ -14,8 +15,10 @@ import {
   waitForPort,
 } from "../lib/native";
 import { basename } from "../lib/time";
+import { getProjectEnv } from "./env";
+import { FLOW_RUNNER } from "./flows";
 import { doorsStore, newId } from "./store";
-import type { Door, LaunchDoor, LaunchStep, Project, ScriptDoor } from "./types";
+import type { Door, FlowDoor, LaunchDoor, LaunchStep, Project, ScriptDoor } from "./types";
 
 export type StepStatus = "wait" | "run" | "bg" | "done" | "fail" | "skip";
 export interface RunStep {
@@ -129,7 +132,8 @@ function wire() {
   ready ??= Promise.all([
     onProcessLog((e) => {
       const runId = procRun.get(e.procId);
-      if (runId) log(runId, e.line, e.stream === "stderr" ? "err" : "out");
+      // stderr is red, except flow progress ("✓ node …") and our own notes ("… installing").
+      if (runId) log(runId, e.line, e.stream === "stdout" ? "out" : e.line.startsWith("✓") ? "ok" : e.line.startsWith("…") ? "info" : "err");
     }),
     onProcessExit((e) => {
       const runId = procRun.get(e.procId);
@@ -199,7 +203,8 @@ function createRun(door: Door, subtitle: string, steps: RunStep[]): Run {
 }
 
 async function doorEnv(door: Door, project: Project | undefined): Promise<Record<string, string>> {
-  const env: Record<string, string> = { DOOR_ID: door.id, DOOR_TITLE: door.title };
+  // The project's own variables first (Supabase keys etc.), then the door's.
+  const env: Record<string, string> = { ...getProjectEnv(project?.id), DOOR_ID: door.id, DOOR_TITLE: door.title };
   if (project) env.DOOR_PROJECT_ID = project.id;
   if (project?.path) env.DOOR_PROJECT_DIR = await expandHome(project.path);
   return env;
@@ -231,6 +236,7 @@ export async function runDoor(door: Door, project: Project | undefined): Promise
       doorsStore.markRun(door.id);
       return;
     case "flow":
+      if (door.file) return runFlow({ ...door, file: door.file }, project);
       doorsStore.markRun(door.id);
       navigate({ name: "flow", doorId: door.id });
       return;
@@ -241,14 +247,19 @@ export async function runDoor(door: Door, project: Project | undefined): Promise
   }
 }
 
-async function runScript(door: ScriptDoor, project: Project | undefined) {
-  requireApp("Running scripts");
-  const run = createRun(door, door.file, [{ label: `node ${basename(door.file)}`, status: "run", startedAt: Date.now() }]);
+/** Run one file through the login shell as a single-step run. */
+async function runFile(
+  door: Door & { file: string },
+  project: Project | undefined,
+  opts: { label: string; command: string; script: string; env?: Record<string, string>; hint?: string },
+) {
+  const run = createRun(door, door.file, [{ label: opts.label, status: "run", startedAt: Date.now() }]);
   loopDone.add(run.id);
-  log(run.id, `$ node ${door.file}`, "cmd");
+  log(run.id, `$ ${opts.command} ${door.file}`, "cmd");
+  if (opts.hint) log(run.id, opts.hint, "info");
   try {
-    const env = { ...(await doorEnv(door, project)), DOOR_FILE: await expandHome(door.file) };
-    const { exited } = await startProcess(run.id, 'exec node "$DOOR_FILE"', project?.path, env);
+    const env = { ...(await doorEnv(door, project)), ...opts.env, DOOR_FILE: await expandHome(door.file) };
+    const { exited } = await startProcess(run.id, opts.script, project?.path, env);
     const code = await exited;
     if (getRun(run.id)?.status !== "running") return;
     setStep(run.id, 0, { status: code === 0 ? "done" : "fail" });
@@ -259,6 +270,23 @@ async function runScript(door: ScriptDoor, project: Project | undefined) {
     log(run.id, e instanceof Error ? e.message : String(e), "err");
     finish(run.id, "failed");
   }
+}
+
+async function runScript(door: ScriptDoor, project: Project | undefined) {
+  requireApp("Running scripts");
+  await runFile(door, project, { label: `node ${basename(door.file)}`, command: "node", script: 'exec node "$DOOR_FILE"' });
+}
+
+async function runFlow(door: FlowDoor & { file: string }, project: Project | undefined) {
+  requireApp("Running flows");
+  const env = getProjectEnv(project?.id);
+  await runFile(door, project, {
+    label: `flow ${basename(door.file)}`,
+    command: "bun || node",
+    script: FLOW_RUNNER,
+    env: { DOOR_DEPS: `${await appDataDir()}/scripts` },
+    hint: env.SUPABASE_ANON_KEY ? undefined : "No SUPABASE_ANON_KEY for this project: add it under Edit project → Environment.",
+  });
 }
 
 async function runLaunch(door: LaunchDoor, project: Project | undefined) {

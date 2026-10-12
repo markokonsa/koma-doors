@@ -4,6 +4,7 @@ import { open as pickPath } from "@tauri-apps/plugin-dialog";
 import { APPS, APP_IDS, type AppId } from "../apps";
 import { doorsStore, findProject, newId } from "../doors/store";
 import { SCRIPT_TEMPLATES, SCRIPT_TEMPLATE_IDS, scriptFileName, type ScriptTemplateId } from "../doors/templates";
+import { importFlowFile } from "../doors/flows";
 import { DOOR_KINDS, FLOW_BUILDER_URL, KIND_META, type Door, type DoorDraft, type DoorKind, type LaunchStep } from "../doors/types";
 import { inApp, readTextFile, scriptsDir, writeTextFile } from "../lib/native";
 import { toastError } from "../lib/toast";
@@ -166,7 +167,8 @@ export function DoorDialog({ projectId, door, kind: initialKind }: { projectId: 
   const [fileTouched, setFileTouched] = useState(editing);
   const [dir, setDir] = useState("");
   const [template, setTemplate] = useState<ScriptTemplateId>("blank");
-  const [url, setUrl] = useState(door?.kind === "flow" ? door.url : FLOW_BUILDER_URL);
+  const [url, setUrl] = useState(door?.kind === "flow" ? (door.url ?? FLOW_BUILDER_URL) : FLOW_BUILDER_URL);
+  const [flowFile, setFlowFile] = useState(door?.kind === "flow" ? (door.file ?? "") : "");
   const [target, setTarget] = useState(door?.kind === "link" ? door.target : "");
   const [text, setText] = useState(door?.kind === "note" ? door.text : "");
   const [error, setError] = useState<string | null>(null);
@@ -216,7 +218,8 @@ export function DoorDialog({ projectId, door, kind: initialKind }: { projectId: 
         if (!file.trim()) return "Choose where the script file lives.";
         return { ...base, kind, file: file.trim() };
       case "flow":
-        if (!/^https?:\/\//.test(url.trim())) return "Paste the flow's URL from KOMA/flow.";
+        if (flowFile.trim()) return { ...base, kind, file: flowFile.trim() };
+        if (!/^https?:\/\//.test(url.trim())) return "Import an exported flow (.mjs), or build one in KOMA/flow.";
         return { ...base, kind, url: url.trim() };
       case "link":
         if (!target.trim()) return "Add a URL or a folder.";
@@ -236,6 +239,8 @@ export function DoorDialog({ projectId, door, kind: initialKind }: { projectId: 
         closeOverlays();
         return;
       }
+      // An imported flow is copied into the project's scripts folder, so the door owns its file.
+      if (d.kind === "flow" && d.file) d.file = await importFlowFile(projectId, d.file);
       if (d.kind === "script" && (await readTextFile(d.file)) == null) {
         await writeTextFile(d.file, SCRIPT_TEMPLATES[template].body(d.title));
       }
@@ -372,22 +377,50 @@ export function DoorDialog({ projectId, door, kind: initialKind }: { projectId: 
 
             {kind === "flow" && (
               <>
-                <Field label="Flow URL" htmlFor="door-url">
-                  <input id="door-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder={FLOW_BUILDER_URL} className="field field-mono" />
-                </Field>
+                {editing && door?.kind === "flow" && door.file ? (
+                  <Field label="Flow file">
+                    <div className="break-all rounded-sm border border-line-soft bg-bg-deep p-3 font-mono text-[12px] text-ink-dim">{door.file}</div>
+                  </Field>
+                ) : (
+                  <Field label="Exported flow (.mjs)" htmlFor="door-flow-file">
+                    <div className="flex gap-2">
+                      <input
+                        id="door-flow-file"
+                        value={flowFile}
+                        onChange={(e) => setFlowFile(e.target.value)}
+                        placeholder="~/Downloads/ledger-reconcile.mjs"
+                        className="field field-mono"
+                      />
+                      {inApp && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          onClick={() =>
+                            void browse(false, (p) => {
+                              setFlowFile(p);
+                              if (!title.trim()) setTitle((p.split("/").pop() ?? "").replace(/\.m?js$/, "").replace(/-/g, " "));
+                            })
+                          }
+                        >
+                          <FolderSearch /> Import…
+                        </button>
+                      )}
+                    </div>
+                  </Field>
+                )}
                 <p className="text-[13px] leading-relaxed text-ink-dim">
-                  Clicking the card opens this flow inside the app. Don't have one yet?{" "}
+                  A flow door keeps the script KOMA/flow exports: clicking the card runs it (bun, or node), the pencil reopens it in the
+                  builder. Supabase keys come from the project's environment.{" "}
                   <button
                     type="button"
                     className="text-brand-hover underline-offset-4 hover:underline"
                     onClick={() => {
                       closeOverlays();
-                      navigate({ name: "flow" });
+                      navigate(door ? { name: "flow", doorId: door.id } : { name: "flow" });
                     }}
                   >
-                    Build it in KOMA/flow
-                  </button>{" "}
-                  and use Save as door there.
+                    {door ? "Open in the builder" : "Build a new one in KOMA/flow"}
+                  </button>
                 </p>
               </>
             )}
