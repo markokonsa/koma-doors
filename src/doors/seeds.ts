@@ -4,16 +4,13 @@ import { FLOW_BUILDER_URL } from "./types";
 
 // First-run content. After that, everything lives in the in-app store (src/doors/store.ts).
 export const SEED_PROJECTS: Project[] = [
-  { id: "koma", title: "KOMA", description: "Company tools and sites" },
-  { id: "PR0340", title: "Ülemiste City", description: "Ülemiste City project" },
-  { id: "tc", title: "Tallinn Card", description: "Tallinn Card project" },
+  { id: "default", title: "OMA", description: "Company tools and sites" }
 ];
 
 export const SEED_DOORS: Door[] = [
-  { id: "seed-flow", projectId: "koma", kind: "flow", title: "KOMA/flow builder", url: FLOW_BUILDER_URL },
-  { id: "seed-supabase", projectId: "koma", kind: "link", title: "Supabase", target: "https://supabase.com/dashboard/projects" },
-  { id: "seed-konsa", projectId: "koma", kind: "link", title: "konsa.ee", target: "https://konsa.ee" },
-  { id: "seed-work", projectId: "koma", kind: "link", title: "Work folder", target: "~/Work" },
+  { id: "seed-flow", projectId: "oma", kind: "flow", title: "KOMA/flow builder", url: FLOW_BUILDER_URL },
+  { id: "seed-konsa", projectId: "oma", kind: "link", title: "konsa.ee", target: "https://konsa.ee" },
+  { id: "seed-work", projectId: "oma", kind: "link", title: "Work folder", target: "~/Work" },
 ];
 
 /** Cards saved by the previous version of the app (one localStorage key per project). */

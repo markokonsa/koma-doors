@@ -1,14 +1,28 @@
-# KOMA Home
+# KO,MA
 
-A Tauri 2 desktop app for projects and their **doors**: one-click ways into a project.
+Project: Doors
 
-| Door | What a click does |
-| --- | --- |
+---
+
+## Simple &  local  desktop workflow helper
+
+---
+
+A Tauri 2 desktop app for projects and their **doors**: one-click ways into a project
+
+![App page](public/doors.png) 
+
+![workflow](public/wf.png);
+
+
+| Door           | What a click does                                                                                                                      |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | Project opener | Runs steps in order: open the folder in Cursor, `supabase start`, `pnpm dev` (kept running, waits for its port), open `localhost:3000` |
-| JS script | Runs a `.mjs`/`.js` file with `node` in the project folder; edit it in the built-in editor |
-| Flow | Opens a KOMA/flow workflow (workflows.konsa.ee) inside the app |
-| Link | Opens a URL in the browser or a local folder/file |
-| Note | Plain text kept with the project |
+| JS script      | Runs a `.mjs`/`.js` file with `node` in the project folder; edit it in the built-in editor                                             |
+| Flow           | Opens a KOMA/flow workflow (workflows.konsa.ee) inside the app                                                                         |
+| Link           | Opens a URL in the browser or a local folder/file                                                                                      |
+| Note           | Plain text kept with the project                                                                                                       |
+
 
 Output of openers and scripts streams into the run panel on the right; Stop ends the process and everything it started. Background processes are stopped when the app quits.
 
@@ -22,6 +36,8 @@ pnpm app          # tauri dev: desktop window with hot reload
 pnpm app:build    # release build: .app / .dmg in src-tauri/target/release/bundle
 pnpm dev          # UI only, in a browser at http://localhost:1420 (links work; scripts and local paths don't)
 ```
+
+
 
 ## Keyboard
 
