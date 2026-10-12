@@ -14,7 +14,7 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Live processes: process id from the UI → OS pid (also the process group id).
@@ -177,14 +177,63 @@ pub fn read_text_file(path: String) -> Result<Option<String>, String> {
     }
 }
 
-/// Write a UTF-8 file, creating its folder if needed.
+/// Write a UTF-8 file, creating its folder if needed. Writes to a temp file and renames it into
+/// place, so a crash or full disk never leaves a half-written file.
 #[tauri::command]
 pub fn write_text_file(path: String, contents: String) -> Result<(), String> {
     let path = expand_home(&path);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("Could not create {}: {e}", dir.display()))?;
     }
-    std::fs::write(&path, contents).map_err(|e| format!("Could not write {}: {e}", path.display()))
+    let mut tmp = path.clone().into_os_string();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    std::fs::write(&tmp, contents).map_err(|e| format!("Could not write {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("Could not save {}: {e}", path.display()))
+}
+
+#[derive(Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AppSettings {
+    /// Where projects and doors are saved; `None` = `<app data>/doors.json`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data_file: Option<String>,
+}
+
+fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("settings.json"))
+}
+
+fn read_settings(app: &AppHandle) -> AppSettings {
+    settings_path(app)
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+fn default_data_file(app: &AppHandle) -> Result<String, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(dir.join("doors.json").to_string_lossy().into_owned())
+}
+
+/// The file projects and doors are saved in. Same file for dev and release builds.
+#[tauri::command]
+pub fn data_file(app: AppHandle) -> Result<String, String> {
+    match read_settings(&app).data_file {
+        Some(path) => Ok(expand_home(&path).to_string_lossy().into_owned()),
+        None => default_data_file(&app),
+    }
+}
+
+/// Point the app at another data file (`None` = back to the default). Returns the file now in use.
+#[tauri::command]
+pub fn set_data_file(app: AppHandle, path: Option<String>) -> Result<String, String> {
+    let settings = AppSettings { data_file: path.filter(|p| !p.trim().is_empty()) };
+    let text = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+    let file = settings_path(&app)?;
+    write_text_file(file.to_string_lossy().into_owned(), text)?;
+    data_file(app)
 }
 
 /// Where new door scripts live: `<app data>/scripts/<project id>/`.

@@ -37,6 +37,10 @@ export const waitForPort = (port: number, timeoutMs: number) => invoke<boolean>(
 export const readTextFile = (path: string) => invoke<string | null>("read_text_file", { path });
 export const writeTextFile = (path: string, contents: string) => invoke<void>("write_text_file", { path, contents });
 export const scriptsDir = (projectId: string) => invoke<string>("scripts_dir", { projectId });
+/** The JSON file projects and doors are saved in. */
+export const dataFile = () => invoke<string>("data_file");
+/** Use another data file (null = the default in the app data folder); returns the file now in use. */
+export const setDataFile = (path: string | null) => invoke<string>("set_data_file", { path });
 
 export interface ProcessLog {
   procId: string;

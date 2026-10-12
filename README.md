@@ -30,7 +30,7 @@ pnpm dev          # UI only, in a browser at http://localhost:1420 (links work; 
 ## Where things live
 
 - **Design tokens** (colors, fonts, radii from konsa.ee): `src/input.css` → Tailwind utilities like `bg-bg-soft`, `text-ink-dim`, `border-line`, `bg-brand`, `font-display`, `font-mono`; component classes `.btn`, `.field`, `.tag`, `.eyebrow`, `.door`.
-- **Projects and doors** are saved on this computer (webview localStorage, key `koma-home:doors:v1`). First-run content: `src/doors/seeds.ts`. Cards from the previous version are migrated on first launch.
+- **Projects and doors** are saved in one JSON file, `~/Library/Application Support/ee.konsa.home/doors.json` (shared by dev and release builds). Settings → *Where your data lives* can move it to another folder, e.g. iCloud Drive or a git repo; that choice is kept in `settings.json` next to it. On first launch the file is created from earlier localStorage data or `src/doors/seeds.ts`.
 - **New scripts** are written to the app data folder, `scripts/<project>/<name>.mjs` (or point a door at any existing file).
 - **Process runner** (spawn through your login shell, stream output, stop, wait for a port, read/write script files): `src-tauri/src/runner.rs`; the TypeScript side is `src/lib/native.ts` and `src/doors/runs.ts`.
 - **Apps for “open in app” steps:** `src/apps.ts`. **Script templates:** `src/doors/templates.ts`.
